@@ -1,0 +1,117 @@
+complete code 
+
+#include <SoftwareSerial.h>
+#include <TinyGPS++.h>
+#include <Wire.h>
+#include <MPU6050.h>
+
+// Define SIM900A module connections
+#define SIM900A_RX_PIN D2
+#define SIM900A_TX_PIN D3
+
+// Define GPS module connections
+#define GPS_RX_PIN D4
+#define GPS_TX_PIN D5
+
+// Configure software serial connections
+SoftwareSerial sim900A(SIM900A_RX_PIN, SIM900A_TX_PIN);
+SoftwareSerial gpsSerial(GPS_RX_PIN, GPS_TX_PIN);
+
+// Initialize GPS and MPU6050 objects
+TinyGPSPlus gps;
+MPU6050 mpu6050;
+
+// Load Cell Variables
+const int loadCellPin = A0;
+const int threshold = 500; // Adjust the threshold as per your load cell readings
+
+void setup() {
+  // Start the hardware serial port
+  Serial.begin(9600);
+
+  // Start the software serial ports
+  sim900A.begin(9600);
+  gpsSerial.begin(9600);
+
+  // Initialize MPU6050
+  Wire.begin();
+  mpu6050.initialize();
+
+  // Wait for SIM900A module to initialize
+  delay(2000);
+
+  // Set SIM900A to AT command mode
+  sim900A.print("AT\r\n");
+  delay(1000);
+
+  // Check if SIM900A module is responding
+  if (sim900A.find("OK")) {
+    Serial.println("SIM900A module is ready.");
+  } else {
+    Serial.println("SIM900A module is not responding. Check connections and reset.");
+    while (true);
+  }
+}
+
+void loop() {
+  // Update GPS data
+  while (gpsSerial.available() > 0) {
+    if (gps.encode(gpsSerial.read())) {
+      if (gps.location.isValid()) {
+        // Retrieve latitude and longitude
+        float latitude = gps.location.lat();
+        float longitude = gps.location.lng();
+
+        // Check for sudden drop using MPU6050 accelerometer
+        int16_t accelerometerY = mpu6050.getAccelerationY();
+        if (accelerometerY < -threshold) {
+          // Trigger load cell
+          int loadCellValue = analogRead(loadCellPin);
+
+          // Send location SMS
+          char locationMessage[100];
+          sprintf(locationMessage, "Sudden drop detected! Latitude: %.6f, Longitude: %.6f, Load Cell Value: %d", latitude, longitude, loadCellValue);
+          sendSMS("+1234567890", locationMessage);
+
+          // Print location and load cell value to serial monitor
+          Serial.println("Sudden drop detected!");
+          Serial.print("Latitude: ");
+          Serial.println(latitude, 6);
+          Serial.print("Longitude: ");
+          Serial.println(longitude, 6);
+          Serial.print("Load Cell Value: ");
+          Serial.println(loadCellValue);
+        }
+      } else {
+        Serial.println("GPS data invalid");
+      }
+    }
+  }
+}
+
+void sendSMS(const char* phoneNumber, const char* message) {
+  // Set SIM900A to text mode
+  sim900A.print("AT+CMGF=1\r\n");
+  delay(1000);
+
+  // Set the phone number
+  sim900A.print("AT+CMGS=\"");
+  sim900A.print(phoneNumber);
+  sim900A.print("\"\r\n");
+  delay(1000);
+
+  // Send the message
+  sim900A.print(message);
+  delay(1000);
+
+  // Send the Ctrl+Z (ASCII code 26) to indicate the end of the message
+  sim900A.print((char)26);
+  delay(1000);
+
+  // Wait for the message to be sent
+  if (sim900A.find("OK")) {
+    Serial.println("SMS sent successfully.");
+  } else {
+    Serial.println("Failed to send SMS.");
+  }
+}
